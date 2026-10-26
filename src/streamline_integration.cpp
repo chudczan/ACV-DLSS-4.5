@@ -14,6 +14,10 @@
 #include <chrono>
 #include <algorithm>
 #include "hooks.h"
+#include <atomic>
+
+// Count actual evaluation calls, independently of SDK capability flags.
+static std::atomic<uint64_t> g_dlssCalls{0}, g_dlssOk{0}, g_dlssFailed{0};
 
 #undef SL_FAILED
 #undef SL_SUCCEEDED
@@ -195,6 +199,17 @@ void StreamlineIntegration::Shutdown() {
 
 void StreamlineIntegration::NewFrame(IDXGISwapChain* pSwapChain) {
     if (!m_initialized) return;
+    static ULONGLONG lastDlssReport = 0;
+    const ULONGLONG reportNow = GetTickCount64();
+    if (reportNow - lastDlssReport >= 5000) {
+        LOG_INFO("[DLSS] mode=%d enabled=%d calls=%llu ok=%llu failed=%llu color=%p depth=%p motion=%p output=%p camera=%d (last interval; SDK acceptance is not visual validation)",
+            GetDLSSModeIndex(), m_dlssEnabled,
+            (unsigned long long)g_dlssCalls.exchange(0),
+            (unsigned long long)g_dlssOk.exchange(0),
+            (unsigned long long)g_dlssFailed.exchange(0),
+            m_colorBuffer.Get(), m_depthBuffer.Get(), m_motionVectors.Get(), m_backBuffer.Get(), m_hasCameraData);
+        lastDlssReport = reportNow;
+    }
     m_needNewFrameToken = true;
     if (m_needFeatureReload) {
         LOG_INFO("Reloading Streamline features...");
@@ -299,7 +314,19 @@ void StreamlineIntegration::EvaluateDLSS(ID3D12GraphicsCommandList* pCmdList) {
     m_viewport = sl::ViewportHandle(0);
     const sl::BaseStructure* inputs[] = { &m_viewport };
     if (m_dlssSupported && m_dlssEnabled) {
-        slEvaluateFeature(sl::kFeatureDLSS, *m_frameToken, inputs, 1, pCmdList);
+        ++g_dlssCalls;
+        const sl::Result result = slEvaluateFeature(sl::kFeatureDLSS, *m_frameToken, inputs, 1, pCmdList);
+        if (SL_SUCCEEDED(result)) {
+            ++g_dlssOk;
+        } else {
+            ++g_dlssFailed;
+            static ULONGLONG lastFailure = 0;
+            const ULONGLONG now = GetTickCount64();
+            if (now - lastFailure >= 5000) {
+                LOG_ERROR("[DLSS] slEvaluateFeature failed: %d", static_cast<int>(result));
+                lastFailure = now;
+            }
+        }
     }
     if (m_rayReconstructionEnabled && m_rrLoaded && m_rayReconstructionSupported) {
         if (!m_colorBuffer || !m_depthBuffer || !m_motionVectors) {
@@ -642,7 +669,8 @@ void StreamlineIntegration::UpdateOptions() {
         dlssOptions.mode = m_dlssMode; dlssOptions.outputWidth = m_viewportWidth; dlssOptions.outputHeight = m_viewportHeight; dlssOptions.sharpness = m_sharpness; dlssOptions.colorBuffersHDR = sl::Boolean::eTrue;
         dlssOptions.useAutoExposure = sl::Boolean::eTrue;
         m_viewport = sl::ViewportHandle(0);
-        slDLSSSetOptions(m_viewport, dlssOptions);
+        const sl::Result optionsResult = slDLSSSetOptions(m_viewport, dlssOptions);
+        if (SL_FAILED(optionsResult)) LOG_ERROR("[DLSS] slDLSSSetOptions failed: %d", static_cast<int>(optionsResult));
     }
     UpdateDeepDVCAdaptive();
     UpdateDeepDVCOptions();

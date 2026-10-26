@@ -1,111 +1,24 @@
 @echo off
-REM ============================================================================
-REM DLSS 4 Proxy DLL - Build Script for Visual Studio
-REM ============================================================================
-REM This script builds the proxy DLL using Visual Studio's compiler.
-REM Run from Visual Studio Developer Command Prompt, or it will auto-detect VS.
-REM ============================================================================
-
-setlocal enabledelayedexpansion
-
-echo ============================================
-echo DLSS 4 Proxy DLL Build Script
-echo ============================================
-
-REM Check for NVIDIA Streamline SDK
-if exist "external\streamline\lib\x64\sl.interposer.lib" (
-    set "STREAMLINE_SDK=external\streamline"
-) else (
-    set "STREAMLINE_SDK=%USERPROFILE%\Downloads\streamline-sdk-v2.10.3"
-)
-
-if not exist "%STREAMLINE_SDK%\lib\x64\sl.interposer.lib" (
-    echo ERROR: NVIDIA Streamline SDK not found!
-    echo Checked local: external\streamline
-    echo Checked global: %USERPROFILE%\Downloads\streamline-sdk-v2.10.3
-    echo.
-    echo Please download the SDK from:
-    echo https://developer.nvidia.com/rtx/streamline
-    echo.
-    echo Or place it in external\streamline
-    exit /b 1
-)
-echo Found Streamline SDK: %STREAMLINE_SDK%
-set "STREAMLINE_BIN=%STREAMLINE_SDK%\bin\x64"
-
-REM Check for NVIDIA NVAPI SDK (GPU metrics)
-if exist "external\nvapi\nvapi-main\amd64\nvapi64.lib" (
-    set "NVAPI_SDK=external\nvapi\nvapi-main"
-) else (
-    set "NVAPI_SDK=%USERPROFILE%\Downloads\nvapi-main"
-)
-if not exist "%NVAPI_SDK%\amd64\nvapi64.lib" (
-    echo ERROR: NVIDIA NVAPI SDK not found!
-    echo Checked local: external\nvapi\nvapi-main
-    echo Checked global: %USERPROFILE%\Downloads\nvapi-main
-    echo.
-    echo Please download NVAPI from:
-    echo https://github.com/NVIDIA/nvapi
-    exit /b 1
-)
-echo Found NVAPI SDK: %NVAPI_SDK%
-
-REM Check if cl.exe is available
+setlocal
+cd /d "%~dp0"
+set "TEMP=%CD%\build\temp"
+set "TMP=%TEMP%"
+set "STREAMLINE_SDK=external\streamline-2.14.16"
+set "NVAPI_SDK=external\nvapi\nvapi-main"
+if not exist build\temp mkdir build\temp
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0setup-dependencies.ps1"
+if errorlevel 1 exit /b 1
 where cl >nul 2>&1
-if %errorlevel% equ 0 (
-    echo Compiler found in PATH
-    goto :build
-)
-
-REM Try to find Visual Studio
-echo Looking for Visual Studio installation...
-
+if not errorlevel 1 goto compile
 set "VSWHERE=%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe"
-if exist "%VSWHERE%" (
-    for /f "usebackq tokens=*" %%i in (`"%VSWHERE%" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do (
-        set "VS_PATH=%%i"
-    )
-)
-
-if defined VS_PATH (
-    echo Found Visual Studio at: !VS_PATH!
-    call "!VS_PATH!\VC\Auxiliary\Build\vcvars64.bat"
-    goto :build
-)
-
-REM Try common VS paths
-for %%V in (2022 2019 2017) do (
-    for %%E in (Enterprise Professional Community BuildTools) do (
-        set "TRYPATH=C:\Program Files\Microsoft Visual Studio\%%V\%%E\VC\Auxiliary\Build\vcvars64.bat"
-        if exist "!TRYPATH!" (
-            echo Found VS %%V %%E
-            call "!TRYPATH!"
-            goto :build
-        )
-        set "TRYPATH=C:\Program Files (x86)\Microsoft Visual Studio\%%V\%%E\VC\Auxiliary\Build\vcvars64.bat"
-        if exist "!TRYPATH!" (
-            echo Found VS %%V %%E (x86)
-            call "!TRYPATH!"
-            goto :build
-        )
-    )
-)
-
-echo ERROR: Could not find Visual Studio installation!
-echo Please run this script from a Visual Studio Developer Command Prompt.
-echo Or install Visual Studio with C++ workload.
-exit /b 1
-
-:build
-echo.
-echo Building DLSS 4 Proxy DLL...
-echo.
-
-REM Create output directory
-if not exist "bin" mkdir bin
-
-REM Compile all source files
-cl /LD /EHsc /std:c++17 /O2 ^
+if not exist "%VSWHERE%" exit /b 1
+for /f "usebackq tokens=*" %%i in (`"%VSWHERE%" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set "VS_PATH=%%i"
+if not defined VS_PATH exit /b 1
+call "%VS_PATH%\VC\Auxiliary\Build\vcvars64.bat"
+if errorlevel 1 exit /b %errorlevel%
+:compile
+if not exist bin mkdir bin
+cl /Fo:build\ /LD /EHsc /std:c++17 /O2 ^
     /DUNICODE /D_UNICODE /DWIN32_LEAN_AND_MEAN /DNOMINMAX ^
     /I. ^
     /I"local_headers" ^
@@ -140,19 +53,16 @@ cl /LD /EHsc /std:c++17 /O2 ^
     /DEF:dxgi.def ^
     /DLL
 
-if %errorlevel% equ 0 (
-    echo.
-    echo ============================================
-    echo BUILD SUCCESSFUL!
-    echo ============================================
-    echo Output: bin\dxgi.dll
-    echo.
-    echo Deploying to game folder...
-    set "DLSS4_SKIP_PAUSE=1"
-    set "DLSS4_SDK_BIN=%STREAMLINE_BIN%"
-    powershell -ExecutionPolicy Bypass -File "Install.ps1"
-    echo ============================================
-) else (
-    echo.
-    echo BUILD FAILED! Check errors above.
-)
+
+if errorlevel 1 exit /b 1
+copy /y "%STREAMLINE_SDK%\bin\x64\sl.*.dll" bin\ >nul
+if errorlevel 1 exit /b 1
+copy /y "%STREAMLINE_SDK%\bin\x64\nvngx_*.dll" bin\ >nul
+if errorlevel 1 exit /b 1
+copy /y "%STREAMLINE_SDK%\license.txt" bin\Streamline-LICENSE.txt >nul
+copy /y "%STREAMLINE_SDK%\3rd-party-licenses.md" bin\Streamline-3rd-party-licenses.md >nul
+copy /y "external\nvapi\nvapi-main\License.txt" bin\NVAPI-LICENSE.txt >nul
+copy /y LICENSE bin\Mod-LICENSE.txt >nul
+copy /y "%STREAMLINE_SDK%\bin\x64\*.license.txt" bin\ >nul
+echo Build complete: bin\dxgi.dll. Game files and registry were not changed.
+exit /b 0

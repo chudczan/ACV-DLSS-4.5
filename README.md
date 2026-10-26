@@ -90,17 +90,33 @@ This mod replaces the game's standard TAA with **NVIDIA DLSS 4.5** (AI Upscaling
 
 ## Building from Source
 
-**Prerequisites:**
-*   Visual Studio 2019 or 2022 (C++ Desktop Development workload)
-*   [NVIDIA Streamline SDK](https://developer.nvidia.com/rtx/streamline)
-*   [NVIDIA NVAPI](https://github.com/NVIDIA/nvapi)
+Use Visual Studio 2022 with Desktop development with C++ and a Windows 10/11 SDK.
+Run `build.bat` (or `build-local.bat`) from the repository folder (x64). It locates the installed
+C++ compiler and downloads the missing dependencies with `setup-dependencies.ps1`:
 
-**Steps:**
-1.  Clone the repository.
-2.  Place the Streamline SDK in `external/streamline` (or `Downloads`).
-3.  Place NVAPI in `external/nvapi` (or `Downloads`).
-4.  Run `build.bat` from a Developer Command Prompt (or just double-click it, it will try to find VS).
-5.  The output DLL will be in `bin/dxgi.dll`.
+* NVIDIA Streamline **2.14.16**, pinned to the official x64 release with SHA-256 verification.
+* The missing NVAPI x64 import library, pinned to an NVIDIA repository commit with SHA-256 verification; headers are already included in this repository.
+
+SDKs, download cache, temporary files and build output stay inside this folder.
+Allow approximately 2 GB of free space for dependencies and compilation.
+The output is `bin/dxgi.dll` plus the matching Streamline runtime DLLs and licenses.
+This build command does not install into the game or import registry settings.
+Run `INSTALL.bat` separately only when you want to install the compiled mod into the game.
+
+GitHub Actions also builds Windows x64 and publishes the DLLs and licenses as a workflow artifact.
+
+### Runtime diagnostics
+
+`dlss4_proxy.log` now reports `[DLSS]` counters every five seconds:
+`calls`, `ok`, `failed`, the selected mode, camera availability and input/output pointers.
+`calls=0` means no DLSS evaluations were reached during the interval; nonzero
+`failed` counts are accompanied by the numeric Streamline error code.
+Errors from `slDLSSSetOptions` are also logged.
+`ok` means the SDK accepted the evaluation, not that image quality or resource selection
+has been verified. The existing green capability indicators are not runtime proof.
+
+Updating the SDK does not repair the game's buffer detection or guarantee working
+upscaling, DLAA or frame generation. In-game validation is still required.
 
 ---
 

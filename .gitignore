@@ -38,3 +38,7 @@ Desktop.ini
 
 # Mock/Test folders
 MockGameFolder/
+
+# Downloaded SDKs (pinned by setup-dependencies.ps1)
+external/streamline/
+external/streamline-*/
